@@ -1,8 +1,7 @@
 {
   "profiles": {
     "AutoUpdate": {
-      "commandName": "Project",
-      "commandLineArgs": "-r f:\\Project\\动物园代码\\AutoUpdate\\AutoUpdate\\output\\update\\update.ini"
+      "commandName": "Project"
     }
   }
 }
