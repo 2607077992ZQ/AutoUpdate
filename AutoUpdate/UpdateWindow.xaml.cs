@@ -31,7 +31,7 @@ namespace AutoUpdate
 
         private void Init()
         {
-            new Thread(async () =>
+            new Thread(() =>
             {
                 ParameterType type = new ParameterType();
 
@@ -65,13 +65,7 @@ namespace AutoUpdate
                             string[,] time = (string[,])update;
 
                             Thread.Sleep(Convert.ToInt32(time[0, 1]));
-                            AutoUpdate(s, t);   //更新时需要等待async 调试状态先注释掉下面的提示
-
-                            //Console.WriteLine("更新完成");
-                            //Application.Current.Dispatcher.Invoke(new Action(() =>
-                            //{
-                            //    Application.Current.Shutdown();
-                            //}));
+                            AutoUpdate(s, t);
                         }
                         catch (Exception)
                         {
@@ -122,12 +116,18 @@ namespace AutoUpdate
                 {
                     case "github":
                         //对比本地的ini的哈希 或对比本地的version 如果不一致就拉仓库
-                        GithubUpdate(fileHash, server);
+                        await GithubUpdate(fileHash, server);
                         break;
 
                     default:
                         break;
                 }
+
+                Console.WriteLine("更新完成");
+                Application.Current.Dispatcher.Invoke(new Action(() =>
+                {
+                    Application.Current.Shutdown(0);
+                }));
             }
             catch (Exception ex)
             {
@@ -146,7 +146,7 @@ namespace AutoUpdate
         /// github仓库更新
         /// </summary>
         /// <param name="server"></param>
-        private async void GithubUpdate(List<string[,]> hash, string server)
+        private async Task GithubUpdate(List<string[,]> hash, string server)
         {
             string[] warehouse = server.Split(PathNames.ServerSplitChar);
             if (warehouse.Count() == 3)
@@ -403,24 +403,27 @@ namespace AutoUpdate
             /// <param name="str"></param>
             public void FilterRoute(string str)
             {
-                string filter = Read(Node[1], Setting[(int)SettingEnum.File]);
-                string path = str.ToLower().Replace(PathNames.paths.CurrentDirectory.ToLower() + "\\", string.Empty);
-
-                if (!string.IsNullOrEmpty(filter))
+                if (File.Exists(str))
                 {
-                    FileJsonConfig filelist = JObject.Parse(filter).ToObject<FileJsonConfig>();
-                    if (filelist.File.Find(w => w == path) == null)
+                    string filter = Read(Node[1], Setting[(int)SettingEnum.File]);
+                    string path = str.ToLower().Replace(PathNames.paths.CurrentDirectory.ToLower() + "\\", string.Empty);
+
+                    if (!string.IsNullOrEmpty(filter))
                     {
-                        filelist.File.Add(path);
-                        Write(Node[1], Setting[(int)SettingEnum.File], JsonConvert.SerializeObject(filelist));
+                        FileJsonConfig filelist = JObject.Parse(filter).ToObject<FileJsonConfig>();
+                        if (filelist.File.Find(w => w == path) == null)
+                        {
+                            filelist.File.Add(path);
+                            Write(Node[1], Setting[(int)SettingEnum.File], JsonConvert.SerializeObject(filelist));
+                        }
                     }
-                }
-                else
-                {
-                    FileJsonConfig json = new FileJsonConfig();
-                    json.File.Add(path);
+                    else
+                    {
+                        FileJsonConfig json = new FileJsonConfig();
+                        json.File.Add(path);
 
-                    Write(Node[1], Setting[(int)SettingEnum.File], JsonConvert.SerializeObject(json));
+                        Write(Node[1], Setting[(int)SettingEnum.File], JsonConvert.SerializeObject(json));
+                    }
                 }
             }
 
@@ -430,15 +433,18 @@ namespace AutoUpdate
             /// <param name="str"></param>
             public void DeleteRoute(string str)
             {
-                string filter = Read(Node[1], Setting[(int)SettingEnum.File]);
-                if (!string.IsNullOrEmpty(filter))
+                if (File.Exists(str))
                 {
-                    string path = str.ToLower().Replace(PathNames.paths.CurrentDirectory.ToLower() + "\\", string.Empty);
-                    FileJsonConfig filelist = JObject.Parse(filter).ToObject<FileJsonConfig>();
-                    if (filelist.File.Find(w => w == path) != null)
+                    string filter = Read(Node[1], Setting[(int)SettingEnum.File]);
+                    if (!string.IsNullOrEmpty(filter))
                     {
-                        filelist.File.Remove(path);
-                        Write(Node[1], Setting[(int)SettingEnum.File], JsonConvert.SerializeObject(filelist));
+                        string path = str.ToLower().Replace(PathNames.paths.CurrentDirectory.ToLower() + "\\", string.Empty);
+                        FileJsonConfig filelist = JObject.Parse(filter).ToObject<FileJsonConfig>();
+                        if (filelist.File.Find(w => w == path) != null)
+                        {
+                            filelist.File.Remove(path);
+                            Write(Node[1], Setting[(int)SettingEnum.File], JsonConvert.SerializeObject(filelist));
+                        }
                     }
                 }
             }
@@ -669,7 +675,7 @@ namespace AutoUpdate
                 {
                     string url = string.Empty;
                     if (GetIni)
-                        url = $"https://raw.githubusercontent.com/{project[0]}/{project[1]}/{project[2]}/Update/{UpdateFile}ini";
+                        url = $"https://raw.githubusercontent.com/{project[0]}/{project[1]}/refs/heads/{project[2]}/update/{UpdateFile}ini";
                     else
                         url = $"https://github.com/{project[0]}/{project[1]}/archive/refs/heads/{project[2]}.zip";
 
