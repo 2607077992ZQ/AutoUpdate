@@ -1,0 +1,8 @@
+{
+  "profiles": {
+    "AutoUpdate": {
+      "commandName": "Project",
+      "commandLineArgs": "-a 0"
+    }
+  }
+}
