@@ -28,16 +28,17 @@ namespace AutoUpdate
                         entrance.Add(addlist);
                     }
 
-                    new UpdateWindow(entrance).Hide();
-                    //if (IsInspectVersion(file))
-                    //{
-                    //    new UpdateWindow(entrance).Hide();
-                    //}
-                    //else
-                    //{
-                    //    Err_print("无法连接至服务器");
-                    //}
-
+                    //new UpdateWindow(entrance).Hide();
+                    if (IsInspectVersion() || args.Contains("-i"))
+                    {
+                        
+                        new UpdateWindow(entrance).Hide();
+                    }
+                    else
+                    {
+                        //没有配置文件
+                        Err_print("无法连接至服务器");
+                    }
                 }
                 else
                 {
@@ -57,9 +58,9 @@ namespace AutoUpdate
             Application.Current.Shutdown();
         }
 
-        private bool IsInspectVersion(string file)
+        private bool IsInspectVersion()
         {
-            if (System.IO.File.Exists(file + @"update.ini"))
+            if (System.IO.File.Exists(PathNames.paths.IniFile))
             {
                 return true;
             }

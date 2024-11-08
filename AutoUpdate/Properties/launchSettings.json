@@ -2,7 +2,7 @@
   "profiles": {
     "AutoUpdate": {
       "commandName": "Project",
-      "commandLineArgs": "-a 0"
+      "commandLineArgs": "-r f:\\Project\\动物园代码\\AutoUpdate\\AutoUpdate\\output\\update\\update.ini"
     }
   }
 }
