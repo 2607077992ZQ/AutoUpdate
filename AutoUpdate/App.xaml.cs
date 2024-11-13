@@ -55,7 +55,7 @@ namespace AutoUpdate
         private void Err_print(string err = "参数有误")
         {
             Console.WriteLine(err);
-            Application.Current.Shutdown();
+            Application.Current.Shutdown(ErrorCode.InitError);
         }
 
         private bool IsInspectVersion()

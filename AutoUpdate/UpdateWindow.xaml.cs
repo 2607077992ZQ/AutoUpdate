@@ -51,6 +51,7 @@ namespace AutoUpdate
                         case "-r": type.FilterRoute(item[0, 1]); break;
                         case "-d": type.DeleteRoute(item[0, 1]); break;
                         case "-v": type.Version(item[0, 1]); break;
+                        case "-p": type.Path_Server(item[0, 1]); break;
                         case "-a": update = item; break;
                         default: break;
                     }
@@ -72,7 +73,7 @@ namespace AutoUpdate
                             Console.WriteLine("定时更新时间有误 单位为:ms");
                             Application.Current.Dispatcher.Invoke(new Action(() =>
                             {
-                                Application.Current.Shutdown();
+                                Application.Current.Shutdown(ErrorCode.InitError);
                             }));
                         }
                     }
@@ -83,7 +84,7 @@ namespace AutoUpdate
                         Console.WriteLine("未配置服务器地址");
                         Application.Current.Dispatcher.Invoke(new Action(() =>
                         {
-                            Application.Current.Shutdown();
+                            Application.Current.Shutdown(ErrorCode.InitError);
                         }));
                     }
                 }
@@ -92,7 +93,7 @@ namespace AutoUpdate
                     //不计划更新 关闭
                     Application.Current.Dispatcher.Invoke(new Action(() =>
                     {
-                        Application.Current.Shutdown();
+                        Application.Current.Shutdown(ErrorCode.Normal);
                     }));
                 }
 
@@ -126,7 +127,7 @@ namespace AutoUpdate
                 Console.WriteLine("更新完成");
                 Application.Current.Dispatcher.Invoke(new Action(() =>
                 {
-                    Application.Current.Shutdown(0);
+                    Application.Current.Shutdown(ErrorCode.Updated);
                 }));
             }
             catch (Exception ex)
@@ -136,7 +137,7 @@ namespace AutoUpdate
 
                 Application.Current.Dispatcher.Invoke(() =>
                 {
-                    Application.Current.Shutdown();
+                    Application.Current.Shutdown(ErrorCode.UpdateError);
                 });
             }
 
@@ -153,25 +154,23 @@ namespace AutoUpdate
             {
                 //下载github的配置文件 对比hash 如果不一致就拉仓库 更新至本地
                 DownloadClass down = new DownloadClass();
-                string tmp = await down.GitHubFileAsync(warehouse);
+                string IniFile = await down.GitHubFileAsync(warehouse);
 
                 ParameterType parameterType = new ParameterType();
-                //if (FilesHelp.CalculateFileHash(tmp) != hash.Find(w => w[0, 0].ToLower() == PathNames.paths.IniFile.ToLower())[0, 1])
-                if (FilesHelp.CalculateFileHash(tmp) != FilesHelp.CalculateFileHash(PathNames.paths.IniFile))
+                if (FilesHelp.CalculateFileHash(IniFile) != FilesHelp.CalculateFileHash(PathNames.paths.IniFile))
                 {
-                    if (parameterType.VersionCheck(tmp))
+                    if (parameterType.VersionCheck(IniFile))
                     {
                         //触发拉取
-                        FileClean(new List<string>() { tmp });
                         UI_Show((int)down.DownloadProgress);
-                        tmp = await down.GitHubFileAsync(warehouse, false);
+                        string downZip = await down.GitHubFileAsync(warehouse, false);
 
                         //解压-> 对比hash 差异化更新
                         string uid = Guid.NewGuid().ToString();
-                        string extractPath = System.IO.Path.Combine(System.IO.Path.GetTempPath(), uid);
-                        System.IO.Compression.ZipFile.ExtractToDirectory(tmp, extractPath);
+                        string extractPath = Path.Combine(Path.GetTempPath(), uid);
+                        System.IO.Compression.ZipFile.ExtractToDirectory(downZip, extractPath);
 
-                        string downloadPath = Directory.GetDirectories(System.IO.Path.Combine(down.TempPath, uid)).FirstOrDefault();
+                        string downloadPath = Directory.GetDirectories(Path.Combine(down.TempPath, uid)).FirstOrDefault();
                         var downfileHash = await new FilesHelp().FileHash(downloadPath);
 
                         List<string[,]> CopyFile = new List<string[,]>();   //左新右老
@@ -180,15 +179,16 @@ namespace AutoUpdate
 
                         foreach (var item in downfileHash)
                         {
+                            var NewHash = item;
                             tasks.Add(Task.Run(() =>
                             {
-                                var NewFile = item[0, 0].Replace(downloadPath, string.Empty);
+                                var NewFile = NewHash[0, 0].Replace(downloadPath, string.Empty);
                                 var pastFile = hash.Find(w => w[0, 0].Replace(PathNames.paths.CurrentDirectory, string.Empty) == NewFile);
 
                                 string[,] updateFile = new string[1, 2];
                                 if (pastFile != null)
                                 {
-                                    updateFile[0, 0] = item[0, 0];
+                                    updateFile[0, 0] = NewHash[0, 0];
                                     updateFile[0, 1] = pastFile[0, 0];
 
                                     lock (lockObject)
@@ -196,7 +196,7 @@ namespace AutoUpdate
                                 }
                                 else
                                 {
-                                    updateFile[0, 0] = item[0, 0];
+                                    updateFile[0, 0] = NewHash[0, 0];
                                     updateFile[0, 1] = Path.Combine(PathNames.paths.CurrentDirectory, NewFile.TrimStart('\\'));
 
                                     lock (lockObject)
@@ -209,25 +209,25 @@ namespace AutoUpdate
 
                         await Task.WhenAll(tasks);
                         FileCopy(CopyFile);
-                        FileClean(new List<string>() { tmp, downloadPath });
+                        FileClean(new List<string>() { IniFile, downZip, downloadPath });
                     }
                 }
                 else
                 {
                     //不需要更新
-                    FileClean(new List<string>() { tmp });
+                    FileClean(new List<string>() { IniFile });
                     Application.Current.Dispatcher.Invoke(() =>
                     {
-                        Application.Current.Shutdown();
+                        Application.Current.Shutdown(ErrorCode.NotUpdate);
                     });
                 }
             }
             else
             {
-                Console.WriteLine("github服务请求有误");
+                Console.WriteLine("Github服务请求有误");
                 Application.Current.Dispatcher.Invoke(() =>
                 {
-                    Application.Current.Shutdown();
+                    Application.Current.Shutdown(ErrorCode.InitError);
                 });
             }
         }
@@ -261,7 +261,7 @@ namespace AutoUpdate
         /// <summary>
         /// 文件复制 
         /// </summary>
-        /// <param name="paths">左新 右老</param>
+        /// <param name="paths">1,2数组->左新 右老</param>
         private void FileCopy(List<string[,]> paths)
         {
             //UI_Show(paths.Count);
@@ -281,18 +281,11 @@ namespace AutoUpdate
                 {
                     try
                     {
-                        if (File.Exists(item[0, 1]))
-                        {
-                            File.Replace(item[0, 0], item[0, 1], null);
-                        }
-                        else
-                        {
-                            File.Copy(item[0, 0], item[0, 1]);
-                        }
+                        File.Copy(item[0, 0], item[0, 1], true);
                         count++;
                         UI_Update(paths.Count, count);
                     }
-                    catch (Exception)
+                    catch (Exception ex)
                     {
                         verification = false;
                     }
@@ -303,7 +296,8 @@ namespace AutoUpdate
             //校验文件 如果全部替换完成 则更新配置文件 否则更新失败
             if (verification)
             {
-                File.Replace(End[0, 0], End[0, 1], null);
+                File.Copy(End[0, 0], End[0, 1], true);
+                Console.WriteLine($"已更新至版本:{new ParameterType().GetVersion()}");
             }
 
         }
@@ -315,12 +309,13 @@ namespace AutoUpdate
         {
             public string IniFile { get => PathNames.paths.IniFile; }
             private string[] Node = new string[] { "Settings", "Route" };
-            private string[] Setting = new string[] { "Server", "Type", "Version", "File" };
+            private string[] Setting = new string[] { "Server", "Type", "Path", "Version", "File" };
 
             private enum SettingEnum
             {
                 Server,
                 Type,
+                Path,
                 Version,
                 File
             }
@@ -363,7 +358,10 @@ namespace AutoUpdate
                 }
                 if (files != null)
                 {
-                    foreach (var item in files)
+                    List<string> fileList = files.ToList();
+                    fileList.Remove(IniFile);
+
+                    foreach (var item in fileList)
                     {
                         FilterRoute(item);
                     }
@@ -450,6 +448,15 @@ namespace AutoUpdate
             }
 
             /// <summary>
+            /// 服务端文件位置
+            /// </summary>
+            /// <param name="path"></param>
+            public void Path_Server(string str)
+            {
+                Write(Node[0], Setting[(int)SettingEnum.Path], str);
+            }
+
+            /// <summary>
             /// 服务器是否已经配置
             /// </summary>
             /// <returns></returns>
@@ -486,6 +493,15 @@ namespace AutoUpdate
             }
 
             /// <summary>
+            /// 获取本地版本号
+            /// </summary>
+            /// <returns></returns>
+            public string GetVersion()
+            {
+                return Read(Node[0], Setting[(int)SettingEnum.Version]);
+            }
+
+            /// <summary>
             /// 版本号检查
             /// </summary>
             /// <param name="file"></param>
@@ -494,11 +510,10 @@ namespace AutoUpdate
             {
                 StringBuilder returnValue = new StringBuilder(255);
                 GetPrivateProfileString(Node[0], Setting[(int)SettingEnum.Version], string.Empty, returnValue, returnValue.Capacity, file);
-                if (Read(Node[0], Setting[(int)SettingEnum.Version]) != returnValue.ToString())
+                if (GetVersion() != returnValue.ToString())
                     return true;
                 else
                     return false;
-
             }
 
             private class FileJsonConfig
@@ -547,29 +562,32 @@ namespace AutoUpdate
                 {
                     foreach (var item in Files)
                     {
-                        if (RouteFile.Find(w => System.IO.Path.Combine(projcetFile, w) == item) == null)
+                        tasks.Add(Task.Run(() =>
                         {
-                            tasks.Add(Task.Run(() =>
+                            string flie = item;
+                            if (!RouteFile.Any(w => string.Equals(Path.GetFullPath(Path.Combine(projcetFile, w)), flie, StringComparison.OrdinalIgnoreCase)))
                             {
                                 string[,] fileHash = new string[1, 2];
-                                fileHash[0, 0] = item;
-                                fileHash[0, 1] = CalculateFileHash(item);
+                                fileHash[0, 0] = flie;
+                                fileHash[0, 1] = CalculateFileHash(flie);
 
                                 lock (lockObject)
                                     hash.Add(fileHash);
-                            }));
-                        }
+                            }
+
+                        }));
                     }
                 }
                 else
                 {
                     foreach (var item in Files)
                     {
+                        string file = item;
                         tasks.Add(Task.Run(() =>
                         {
                             string[,] fileHash = new string[1, 2];
-                            fileHash[0, 0] = item;
-                            fileHash[0, 1] = CalculateFileHash(item);
+                            fileHash[0, 0] = file;
+                            fileHash[0, 1] = CalculateFileHash(file);
 
                             lock (lockObject)
                                 hash.Add(fileHash);
@@ -577,6 +595,7 @@ namespace AutoUpdate
                         }));
                     }
                 }
+
                 await Task.WhenAll(tasks);
 
                 return hash;
@@ -597,32 +616,46 @@ namespace AutoUpdate
                     return GetPaths(path);
                 });
                 var RouteFile = new ParameterType().GetFile();
+
+                List<Task> tasks = new List<Task>();
+                object lockObject = new object();
                 if (RouteFile != null)
                 {
                     foreach (var item in Files)
                     {
-                        if (RouteFile.Find(w => System.IO.Path.Combine(path + w) == item) == null)
+                        string file = item;
+                        tasks.Add(Task.Run(() =>
                         {
-                            string[,] fileHash = new string[1, 2];
-                            fileHash[0, 0] = item;
-                            fileHash[0, 1] = CalculateFileHash(item);
+                            if (!RouteFile.Any(w => string.Equals(Path.GetFullPath(Path.Combine(path, w)), file, StringComparison.OrdinalIgnoreCase)))
+                            {
+                                string[,] fileHash = new string[1, 2];
+                                fileHash[0, 0] = item;
+                                fileHash[0, 1] = CalculateFileHash(item);
 
-                            hash.Add(fileHash);
-                        }
+                                lock (lockObject)
+                                    hash.Add(fileHash);
+                            }
+                        }));
                     }
                 }
                 else
                 {
                     foreach (var item in Files)
                     {
-                        string[,] fileHash = new string[1, 2];
-                        fileHash[0, 0] = item;
-                        fileHash[0, 1] = CalculateFileHash(item);
+                        string file = item;
+                        tasks.Add(Task.Run(() =>
+                        {
+                            string[,] fileHash = new string[1, 2];
+                            fileHash[0, 0] = item;
+                            fileHash[0, 1] = CalculateFileHash(item);
 
-                        hash.Add(fileHash);
+                            lock(lockObject)
+                                hash.Add(fileHash);
+                        }));
                     }
                 }
 
+                await Task.WhenAll(tasks);
                 return hash;
             }
 

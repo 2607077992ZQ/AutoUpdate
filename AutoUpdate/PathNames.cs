@@ -13,7 +13,7 @@ namespace AutoUpdate
         /// <summary>
         /// 服务器地址分割符
         /// </summary>
-        public const char ServerSplitChar = '/';
+        public const char ServerSplitChar = '@';
 
 
         /// <summary>
@@ -58,5 +58,41 @@ namespace AutoUpdate
             /// </summary>
             public string CurrentDirectory { get => Environment.CurrentDirectory; }
         }
+    }
+
+    /// <summary>
+    /// 返回码约定
+    /// </summary>
+    public static class ErrorCode
+    {
+        /// <summary>
+        /// 未被定义的正常退出
+        /// </summary>
+        public const int Normal = 0;
+
+        /// <summary>
+        /// 已完成更新
+        /// </summary>
+        public const int Updated = 1;
+        
+        /// <summary>
+        /// 已经是最新的了 不需要更新
+        /// </summary>
+        public const int NotUpdate = 2;
+
+        /// <summary>
+        /// 更新时出错
+        /// </summary>
+        public const int UpdateError = 10;
+
+        /// <summary>
+        /// 配置文件有误
+        /// </summary>
+        public const int InitError = 99;
+
+        /// <summary>
+        /// 服务器请求超时
+        /// </summary>
+        public const int Timeout = 9999;
     }
 }
