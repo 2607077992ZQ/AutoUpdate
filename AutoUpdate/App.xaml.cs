@@ -29,9 +29,9 @@ namespace AutoUpdate
                     }
 
                     //new UpdateWindow(entrance).Hide();
-                    if (IsInspectVersion() || args.Contains("-i"))
+                    string[] control = new string[] { "-i", "-h" };
+                    if (IsInspectVersion() || args.Any(w => control.Contains(w)))
                     {
-                        
                         new UpdateWindow(entrance).Hide();
                     }
                     else
@@ -54,8 +54,7 @@ namespace AutoUpdate
 
         private void Err_print(string err = "参数有误")
         {
-            Console.WriteLine(err);
-            Application.Current.Shutdown(ErrorCode.InitError);
+            ErrorCode.Exit(ErrorCode.InitError, err);
         }
 
         private bool IsInspectVersion()

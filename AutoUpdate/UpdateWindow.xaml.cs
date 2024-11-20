@@ -1,4 +1,6 @@
-﻿using System.IO;
+﻿using System;
+using System.ComponentModel.DataAnnotations;
+using System.IO;
 using System.Net;
 using System.Net.Http;
 using System.Runtime.InteropServices;
@@ -26,7 +28,6 @@ namespace AutoUpdate
 
         #region
         private List<string[,]> EntranceData = new List<string[,]>();
-        private string ProjectPath { get => PathNames.paths.ProjectPath; }
         #endregion
 
         private void Init()
@@ -52,49 +53,50 @@ namespace AutoUpdate
                         case "-d": type.DeleteRoute(item[0, 1]); break;
                         case "-v": type.Version(item[0, 1]); break;
                         case "-p": type.Path_Server(item[0, 1]); break;
+                        case "-h":
+                            update = new Thread(async () =>
+                            {
+                                await new FilesHelp().CreateHashFile();
+                                type.Version(item[0, 1]);
+                                ErrorCode.Exit(ErrorCode.Updated, $"文件结构以更新至{item[0, 1]}");
+                            })
+                            { IsBackground = true };
+                            break;
                         case "-a": update = item; break;
                         default: break;
                     }
                 }
 
-                if (update != null)
+                switch (update)
                 {
-                    if (type.IsServerSetting(out string s, out string t))
-                    {
-                        try
+                    case null: ErrorCode.Exit(ErrorCode.Normal, null); break;
+                    case string[,]:
+                        if (type.IsServerSetting(out string s, out string t))
                         {
-                            string[,] time = (string[,])update;
-
-                            Thread.Sleep(Convert.ToInt32(time[0, 1]));
-                            AutoUpdate(s, t);
-                        }
-                        catch (Exception)
-                        {
-                            Console.WriteLine("定时更新时间有误 单位为:ms");
-                            Application.Current.Dispatcher.Invoke(new Action(() =>
+                            try
                             {
-                                Application.Current.Shutdown(ErrorCode.InitError);
-                            }));
+                                string[,] time = (string[,])update;
+
+                                Thread.Sleep(Convert.ToInt32(time[0, 1]));
+                                AutoUpdate(s, t);
+                            }
+                            catch (Exception)
+                            {
+                                ErrorCode.Exit(ErrorCode.InitError, "定时更新时间有误 单位为: ms");
+                            }
                         }
-                    }
-                    else
-                    {
-                        //没配置文件 抛出主程序
-                        Console.WriteLine(type.IniFile);
-                        Console.WriteLine("未配置服务器地址");
-                        Application.Current.Dispatcher.Invoke(new Action(() =>
+                        else
                         {
-                            Application.Current.Shutdown(ErrorCode.InitError);
-                        }));
-                    }
-                }
-                else
-                {
-                    //不计划更新 关闭
-                    Application.Current.Dispatcher.Invoke(new Action(() =>
-                    {
-                        Application.Current.Shutdown(ErrorCode.Normal);
-                    }));
+                            //没配置文件 抛出主程序
+                            ErrorCode.Exit(ErrorCode.InitError, "未配置服务器地址");
+                        }
+                        break;
+                    case Thread:
+                        (update as Thread).Start();
+                        break;
+                    default:
+                        ErrorCode.Exit(ErrorCode.Unknown, "unknown");
+                        break;
                 }
 
             })
@@ -110,43 +112,39 @@ namespace AutoUpdate
         private async void AutoUpdate(string server, string type)
         {
             List<string[,]> fileHash = await new FilesHelp().FilesHash();
+            string serverPath = new ParameterType().ServerPath();
 
-            try
+            if (serverPath != string.Empty)
             {
-                switch (type.ToLower())
+                try
                 {
-                    case "github":
-                        //对比本地的ini的哈希 或对比本地的version 如果不一致就拉仓库
-                        await GithubUpdate(fileHash, server);
-                        break;
+                    switch (type.ToLower())
+                    {
+                        case "github": await GithubUpdate(fileHash, server); break;
+                        case "ftp": await FtpUpdate(fileHash, server, serverPath); break;
+                        default:
+                            break;
+                    }
 
-                    default:
-                        break;
+                    ErrorCode.Exit(ErrorCode.Updated, "更新完成");
                 }
-
-                Console.WriteLine("更新完成");
-                Application.Current.Dispatcher.Invoke(new Action(() =>
+                catch (Exception ex)
                 {
-                    Application.Current.Shutdown(ErrorCode.Updated);
-                }));
+                    ErrorCode.Exit(ErrorCode.UpdateError, ex.Message);
+                }
             }
-            catch (Exception ex)
+            else
             {
-                Console.WriteLine(ex.ToString());
-                Console.WriteLine("程序出错 进程已结束");
-
-                Application.Current.Dispatcher.Invoke(() =>
-                {
-                    Application.Current.Shutdown(ErrorCode.UpdateError);
-                });
+                ErrorCode.Exit(ErrorCode.InitError, "未指定服务端文件路径");
             }
-
         }
 
         /// <summary>
         /// github仓库更新
         /// </summary>
-        /// <param name="server"></param>
+        /// <param name="hash">本地文件hash</param>
+        /// <param name="server">用户仓库分支位置</param>
+        /// <returns></returns>
         private async Task GithubUpdate(List<string[,]> hash, string server)
         {
             string[] warehouse = server.Split(PathNames.ServerSplitChar);
@@ -170,7 +168,7 @@ namespace AutoUpdate
                         string extractPath = Path.Combine(Path.GetTempPath(), uid);
                         System.IO.Compression.ZipFile.ExtractToDirectory(downZip, extractPath);
 
-                        string downloadPath = Directory.GetDirectories(Path.Combine(down.TempPath, uid)).FirstOrDefault();
+                        string downloadPath = Directory.GetDirectories(Path.Combine(PathNames.TempPath, uid)).FirstOrDefault();
                         var downfileHash = await new FilesHelp().FileHash(downloadPath);
 
                         List<string[,]> CopyFile = new List<string[,]>();   //左新右老
@@ -216,20 +214,86 @@ namespace AutoUpdate
                 {
                     //不需要更新
                     FileClean(new List<string>() { IniFile });
-                    Application.Current.Dispatcher.Invoke(() =>
-                    {
-                        Application.Current.Shutdown(ErrorCode.NotUpdate);
-                    });
+                    ErrorCode.Exit(ErrorCode.NotUpdate, null);
                 }
             }
             else
             {
-                Console.WriteLine("Github服务请求有误");
-                Application.Current.Dispatcher.Invoke(() =>
-                {
-                    Application.Current.Shutdown(ErrorCode.InitError);
-                });
+                ErrorCode.Exit(ErrorCode.InitError, "Github服务请求有误");
             }
+        }
+
+        /// <summary>
+        /// ftp更新
+        /// </summary>
+        /// <param name="hash">本地文件hash</param>
+        /// <param name="server">服务器地址</param>
+        /// <param name="Serverpath">服务器文件路径</param>
+        private async Task FtpUpdate(List<string[,]> hash, string server, string ServerPath)
+        {
+            string[] warehouse = server.Split(PathNames.ServerSplitChar);
+
+            /*
+             * 规则:分割符切割
+             * 前段为地址:端口
+             * 后段为用户名:密码
+             */
+            if (new[] { 1, 2 }.Contains(warehouse.Count()))
+            {
+                DownloadClass.FtpHelp ftp;
+
+                if(warehouse.Length == 2)
+                {
+                    UserSSL.USER user = new UserSSL().SpiltUserAndPwd(warehouse[1]);
+                    ftp = new DownloadClass.FtpHelp(warehouse[0], ServerPath, user);
+                }
+                else
+                {
+                    ftp = new DownloadClass.FtpHelp(warehouse[0], ServerPath);
+                }
+
+                string InIFile =  ftp.GetFTPFile(DownloadClass.FtpHelp.FileTypeEnum.ini);
+                if (FilesHelp.CalculateFileHash(InIFile) != FilesHelp.CalculateFileHash(PathNames.paths.IniFile))
+                {
+                    string ServerHash = ftp.GetFTPFile(DownloadClass.FtpHelp.FileTypeEnum.hash);
+                    var Newhash = JsonConvert.DeserializeObject<List<FilesHelp.FileHashValue>>(File.ReadAllText(ServerHash));
+
+                    List<Task> tasks = new List<Task>();
+                    foreach (var item in Newhash)
+                    {
+                        var values = item;
+                        tasks.Add(Task.Run(() =>
+                        {
+                            if (!hash.Any(w => w[0, 1] == values.Value))
+                            {
+                                string exiPath = Path.GetDirectoryName(Path.Combine(PathNames.paths.CurrentDirectory, values.Path));
+                                if (!Directory.Exists(exiPath))
+                                {
+                                    Directory.CreateDirectory(exiPath);
+                                }
+                                ftp.GetFTPFile(DownloadClass.FtpHelp.FileTypeEnum.file, values.Path);
+                            }
+                        }));
+                    }
+                    await Task.WhenAll(tasks);
+
+                    FileCopy(new List<string[,]> {
+                        new string[1, 2] { { ServerHash, PathNames.paths.HashFile } },
+                        new string[1, 2] { { InIFile, PathNames.paths.IniFile } },
+                    });
+
+                    FileClean(new List<string> { InIFile, ServerHash });
+                }
+                else
+                {
+                    FileClean(new List<string> { InIFile });
+                }
+            }
+            else
+            {
+                ErrorCode.Exit(ErrorCode.InitError, "FTP服务器请求有误");
+            }
+
         }
 
         /// <summary>
@@ -268,13 +332,14 @@ namespace AutoUpdate
             int count = 0;
 
             string[,] End = new string[0, 1];
-            bool verification = true;
+            object? verification = null;
 
             foreach (var item in paths)
             {
                 if (item[0, 1] == new ParameterType().IniFile)
                 {
                     End = item;
+                    verification = true;
                     continue;
                 }
                 else
@@ -294,7 +359,8 @@ namespace AutoUpdate
             }
 
             //校验文件 如果全部替换完成 则更新配置文件 否则更新失败
-            if (verification)
+            //【这里应该加一个所有本地文件hash计算效验】
+            if (verification is bool)
             {
                 File.Copy(End[0, 0], End[0, 1], true);
                 Console.WriteLine($"已更新至版本:{new ParameterType().GetVersion()}");
@@ -356,6 +422,7 @@ namespace AutoUpdate
                     files = Directory.GetFiles(updatefiles);
                     //files = Directory.GetFiles(updatefiles).Select(s => s.Replace(Directory.GetParent(updatefiles).FullName, string.Empty)).ToArray();
                 }
+                Path_Server("/");   //初始化为根
                 if (files != null)
                 {
                     List<string> fileList = files.ToList();
@@ -401,11 +468,11 @@ namespace AutoUpdate
             /// <param name="str"></param>
             public void FilterRoute(string str)
             {
+                string filter = Read(Node[1], Setting[(int)SettingEnum.File]);
+                string path = str.ToLower().Replace(PathNames.paths.CurrentDirectory.ToLower() + "\\", string.Empty);
+
                 if (File.Exists(str))
                 {
-                    string filter = Read(Node[1], Setting[(int)SettingEnum.File]);
-                    string path = str.ToLower().Replace(PathNames.paths.CurrentDirectory.ToLower() + "\\", string.Empty);
-
                     if (!string.IsNullOrEmpty(filter))
                     {
                         FileJsonConfig filelist = JObject.Parse(filter).ToObject<FileJsonConfig>();
@@ -454,6 +521,15 @@ namespace AutoUpdate
             public void Path_Server(string str)
             {
                 Write(Node[0], Setting[(int)SettingEnum.Path], str);
+            }
+
+            /// <summary>
+            /// 获取服务端文件位置
+            /// </summary>
+            /// <returns></returns>
+            public string ServerPath()
+            {
+                return Read(Node[0], Setting[(int)SettingEnum.Path]);
             }
 
             /// <summary>
@@ -679,6 +755,44 @@ namespace AutoUpdate
                 }
                 return paths;
             }
+
+            /// <summary>
+            /// 创建hash文件
+            /// </summary>
+            public async Task CreateHashFile()
+            {
+                string hread = PathNames.paths.CurrentDirectory;
+                List<string[,]> fileHash = await new FilesHelp().FilesHash();
+
+                List<FileHashValue> hashList = new List<FileHashValue>();
+                foreach (var item in fileHash)
+                {
+                    var value = item;
+                    hashList.Add(new FileHashValue
+                    {
+                        Path = value[0, 0].Replace(hread, string.Empty).TrimStart('\\'),
+                        Value = value[0, 1]
+                    });
+                }
+
+                using (FileStream fs = File.Create(PathNames.paths.HashFile))
+                {
+                    string json = JsonConvert.SerializeObject(hashList);
+                    byte[] bytes = Encoding.UTF8.GetBytes(json);
+                    fs.Write(bytes, 0, bytes.Length);
+                }
+
+            }
+
+            /// <summary>
+            /// 文件hash值
+            /// </summary>
+            public class FileHashValue
+            {
+                public string Path { get; set; }
+
+                public string Value { get; set; }
+            }
         }
 
         /// <summary>
@@ -686,8 +800,11 @@ namespace AutoUpdate
         /// </summary>
         private class DownloadClass
         {
-            private string UpdateFile = string.Format("update.");
-            public string TempPath { get => System.IO.Path.GetTempPath(); }
+            private string UpdateFile = string.Format($"{PathNames.UpdateFileName}.");
+            
+            /// <summary>
+            /// 下载进度 占总百分比的1/2
+            /// </summary>
             public double DownloadProgress { get; set; }
 
             /// <summary>
@@ -712,28 +829,182 @@ namespace AutoUpdate
                     else
                         url = $"https://github.com/{project[0]}/{project[1]}/archive/refs/heads/{project[2]}.zip";
 
-                    HttpResponseMessage response = await client.GetAsync(url);
-                    response.EnsureSuccessStatusCode();
-                    long totalBytes = response.Content.Headers.ContentLength ?? 0;
-
-                    using (Stream contentStream = await response.Content.ReadAsStreamAsync(),
-                        fileStream = new FileStream(System.IO.Path.Combine(TempPath, UpdateFile + (GetIni ? "ini" : "zip")), FileMode.Create, FileAccess.Write))
+                    try
                     {
-                        //await contentStream.CopyToAsync(fileStream);
+                        HttpResponseMessage response = await client.GetAsync(url);
+                        response.EnsureSuccessStatusCode();
+                        long totalBytes = response.Content.Headers.ContentLength ?? 0;
 
-                        byte[] buffer = new byte[8192]; //缓冲
-                        long totalBytesRead = 0;
-                        int bytesRead;
-                        while ((bytesRead = await contentStream.ReadAsync(buffer, 0, buffer.Length)) > 0)
+                        using (Stream contentStream = await response.Content.ReadAsStreamAsync(),
+                            fileStream = new FileStream(System.IO.Path.Combine(PathNames.TempPath, UpdateFile + (GetIni ? "ini" : "zip")), FileMode.Create, FileAccess.Write))
                         {
-                            totalBytesRead += bytesRead;
-                            await fileStream.WriteAsync(buffer, 0, bytesRead);
+                            //await contentStream.CopyToAsync(fileStream);
 
-                            DownloadProgress = ((double)totalBytesRead / totalBytes * 100) / 2;
+                            byte[] buffer = new byte[8192]; //缓冲
+                            long totalBytesRead = 0;
+                            int bytesRead;
+                            while ((bytesRead = await contentStream.ReadAsync(buffer, 0, buffer.Length)) > 0)
+                            {
+                                totalBytesRead += bytesRead;
+                                await fileStream.WriteAsync(buffer, 0, bytesRead);
+
+                                DownloadProgress = ((double)totalBytesRead / totalBytes * 100) / 2;
+                            }
                         }
                     }
+                    catch (Exception ex)
+                    {
+                        ErrorCode.Exit(ErrorCode.Timeout, ex.Message);
+                    }
                 }
-                return System.IO.Path.Combine(TempPath, UpdateFile + (GetIni ? "ini" : "zip"));
+                return System.IO.Path.Combine(PathNames.TempPath, UpdateFile + (GetIni ? "ini" : "zip"));
+            }
+
+            /// <summary>
+            /// FTP
+            /// </summary>
+            public class FtpHelp
+            {
+                /// <summary>
+                /// 服务器地址
+                /// </summary>
+                private string Url { get; }
+
+                /// <summary>
+                /// 登录凭据
+                /// </summary>
+                private UserSSL.USER? User { get; }
+
+                /// <summary>
+                /// 构造服务器地址
+                /// </summary>
+                /// <param name="server">服务器地址</param>
+                /// <param name="path">服务器路径</param>
+                public FtpHelp(string server, string path)
+                {
+                    Url = string.Format($"ftp://{server}/{(path.Trim() == "/" ? string.Empty : path.TrimStart('/').TrimEnd('/') + "/")}");
+                }
+
+                /// <summary>
+                /// 构造服务器地址
+                /// </summary>
+                /// <param name="server">服务器地址</param>
+                /// <param name="path">服务器路径</param>
+                /// <param name="user">登录凭据</param>
+                public FtpHelp(string server, string path, UserSSL.USER user)
+                {
+                    Url = string.Format($"ftp://{server}/{(path.Trim() == "/" ? string.Empty : path.TrimStart('/').TrimEnd('/') + "/")}");
+                    User = user;
+                }
+
+                /// <summary>
+                /// 文件类型
+                /// </summary>
+                public enum FileTypeEnum
+                {
+                    ini,
+                    hash,
+                    file
+                }
+
+                /// <summary>
+                /// 下载单个文件
+                /// </summary>
+                /// <param name="fileType"></param>
+                /// <param name="path">下载路径</param>
+                /// <returns>下载保存路径</returns>
+                public string GetFTPFile(FileTypeEnum fileType, string path = "")
+                {
+                    string DownloadPath = string.Empty;
+                    StringBuilder url = new StringBuilder();
+                    url.Append(Url);
+                    switch (fileType)
+                    {
+                        case FileTypeEnum.ini:
+                            url.Append($"update/{PathNames.UpdateFileName}.ini");
+                            DownloadPath = $"{PathNames.UpdateFileName}.ini";
+                            break;
+                        case FileTypeEnum.hash:
+                            url.Append("update/hash.json");
+                            DownloadPath = $"hash.json";
+                            break;
+                        case FileTypeEnum.file:
+                            url.Append($"{path}");
+                            break;
+                    }
+
+                    FtpWebRequest request = (FtpWebRequest)WebRequest.Create(url.ToString());
+                    request.Method = WebRequestMethods.Ftp.DownloadFile;
+                    if (User != null)
+                        request.Credentials = new NetworkCredential(User.Name, User.Password);
+
+                    using (FtpWebResponse response = (FtpWebResponse)request.GetResponse())
+                    {
+                        using (Stream responseStream = response.GetResponseStream())
+                        {
+                            /*
+                             * 如果是配置文件 -> 临时文件夹+文件
+                             * 如果是下载文件 -> 挂载路径+path直接覆盖
+                             *
+                             */
+
+                            if (fileType == FileTypeEnum.file)
+                                DownloadPath = Path.Combine(PathNames.paths.CurrentDirectory, path);
+                            else
+                                DownloadPath = Path.Combine(PathNames.TempPath, DownloadPath);
+
+                            using (FileStream fs = new FileStream(DownloadPath, FileMode.Create)) 
+                            {
+                                responseStream.CopyTo(fs);
+                            }
+                        }
+                    }
+
+                    return DownloadPath;
+                }
+            }
+
+        }
+
+        /// <summary>
+        /// 登录凭据
+        /// </summary>
+        private class UserSSL
+        {
+            /// <summary>
+            /// 用户实体
+            /// </summary>
+            public class USER
+            {
+                public string Name { get; set; }
+                public string? Password { get; set; }
+            }
+
+            /// <summary>
+            /// 处理登录凭据
+            /// </summary>
+            /// <param name="str">用户名密码拼接的字符串</param>
+            /// <param name="user">用户名</param>
+            /// <param name="pwd">密码</param>
+            public USER SpiltUserAndPwd(string str)
+            {
+                if (str != string.Empty)
+                {
+                    string[] ssl = str.Split(PathNames.UserPwdSplitChar);
+                    switch (ssl.Length)
+                    {
+                        case 1: return new USER { Name = ssl[0] };
+                        case 2:return new USER { Name = ssl[0], Password = ssl[1] };
+                        default:
+                            ErrorCode.Exit(ErrorCode.InitError, "用户名密码配置有误");
+                            return null;
+                    }
+                }
+                else
+                {
+                    return null;
+                }
+                
             }
         }
 
